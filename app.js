@@ -42,6 +42,7 @@
     syncState: "offline",  // offline | pending | synced | error
     readerSubject: null,
     readerCardIndex: 0,
+    readerLastAction: null,
     qMap: {}
   };
 
@@ -1215,6 +1216,7 @@
     var hasNote = !!(note || src);
     var done = isDone(q);
     var pct = Math.round((state.readerCardIndex / qs.length) * 100);
+    var canUndo = state.readerLastAction === "done" && state.readerCardIndex > 0;
 
     var meta = esc(q.type || "");
     if (q.stars) meta += " " + starsStr(q.stars);
@@ -1243,9 +1245,13 @@
             notesHtml +
           "</div>" +
         "</div>" +
+        '<div class="reader-card__editor" hidden></div>' +
         '<div class="reader-card__nav">' +
           '<button class="btn small reader-card__prev"' + (state.readerCardIndex === 0 ? " disabled" : "") + ">&larr; Prev</button>" +
-          '<span class="reader-card__hint">Swipe &rarr; done &middot; &larr; skip</span>' +
+          '<div class="reader-card__nav-mid">' +
+            '<button class="btn small reader-card__notes-btn">' + (hasNote ? "Edit notes" : "Add notes") + "</button>" +
+            (canUndo ? '<button class="btn small reader-card__undo">Undo</button>' : "") +
+          "</div>" +
           '<button class="btn small reader-card__next">Next &rarr;</button>' +
         "</div>" +
       "</div>";
@@ -1262,9 +1268,11 @@
         renderDashboard();
         renderProgress();
       }
+      state.readerLastAction = "done";
       advanceCard(qs);
     }, function () {
       /* swipe left = skip + advance */
+      state.readerLastAction = "skip";
       advanceCard(qs);
     });
 
@@ -1272,9 +1280,52 @@
     var prevBtn = container.querySelector(".reader-card__prev");
     var nextBtn = container.querySelector(".reader-card__next");
     if (prevBtn) prevBtn.addEventListener("click", function () {
-      if (state.readerCardIndex > 0) { state.readerCardIndex--; renderReaderCards(qs); }
+      if (state.readerCardIndex > 0) { state.readerCardIndex--; state.readerLastAction = "nav"; renderReaderCards(qs); }
     });
-    if (nextBtn) nextBtn.addEventListener("click", function () { advanceCard(qs); });
+    if (nextBtn) nextBtn.addEventListener("click", function () {
+      state.readerLastAction = "nav"; advanceCard(qs);
+    });
+
+    /* wire notes button */
+    var notesBtn = container.querySelector(".reader-card__notes-btn");
+    var editorBox = container.querySelector(".reader-card__editor");
+    if (notesBtn && editorBox) {
+      notesBtn.addEventListener("click", function () {
+        if (editorBox.hidden) {
+          editorBox.innerHTML = "";
+          var editor = buildNotesEditor(q);
+          editorBox.appendChild(editor);
+          editorBox.hidden = false;
+          notesBtn.textContent = "Hide notes";
+          /* sync button label when editor's own Collapse is clicked */
+          var collapseBtn = editor.querySelector('[data-act="collapse"]');
+          if (collapseBtn) collapseBtn.addEventListener("click", function () {
+            notesBtn.textContent = (getNote(q.id) || getImg(q.id)) ? "Edit notes" : "Add notes";
+          });
+        } else {
+          editorBox.hidden = true;
+          editorBox.innerHTML = "";
+          notesBtn.textContent = hasNote ? "Edit notes" : "Add notes";
+        }
+      });
+    }
+
+    /* wire undo button */
+    var undoBtn = container.querySelector(".reader-card__undo");
+    if (undoBtn) {
+      undoBtn.addEventListener("click", function () {
+        state.readerCardIndex--;
+        var prevQ = qs[state.readerCardIndex];
+        if (prevQ && isDone(prevQ)) {
+          setDone(prevQ.id, false);
+          schedulePush();
+          renderDashboard();
+          renderProgress();
+        }
+        state.readerLastAction = "undo";
+        renderReaderCards(qs);
+      });
+    }
   }
 
   function advanceCard(qs) {

@@ -721,6 +721,9 @@ body.dark .reader-item.done { border-left-color: #ECE9E2; }
 .reader-card__nav {
   display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-top: 0.8rem;
 }
+.reader-card__nav-mid { display: flex; gap: 0.4rem; }
+.reader-card__undo { color: #b44; border-color: #d99; }
+.reader-card__editor { margin-top: 0.6rem; }
 .reader-card__hint { font-size: 0.72rem; color: #aaa; text-align: center; flex: 1; }
 
 /* summary screen */
@@ -739,6 +742,7 @@ body.dark .reader-card__progress { background: #2a2a30; }
 body.dark .reader-card__swipe { background: #1d1d22; border-color: #2a2a30; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
 body.dark .reader-card__notes { background: #15151a; }
 body.dark .reader-card__underlay--left { background: #555; }
+body.dark .reader-card__undo { color: #e88; border-color: #644; }
 body.dark .reader-summary__stat--skip { background: #2a2a30; color: #aaa; }
 body.dark .notes-preview code { background: rgba(255,255,255,0.12); }
 body.dark .notes-img-thumb { background: #15151a; }
