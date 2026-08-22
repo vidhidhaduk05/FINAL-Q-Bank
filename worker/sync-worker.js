@@ -9,6 +9,8 @@
  *   GET  /        -> { ok:true, progress:{...}, sha:"..." }   (read remote progress)
  *   PUT  /        <- { progress:{...}, sha:"..." }            (write remote progress)
  *                    -> { ok:true, sha:"..." }
+ *   GET  /img/<slug>.<ext>  -> image bytes                    (read a note diagram)
+ *   PUT  /img/<slug>.<ext>  <- raw image bytes                (upload a note diagram)
  *   OPTIONS /     -> CORS preflight
  *
  * Required environment (set via `wrangler secret` for the token, `wrangler deploy --var` or
@@ -18,24 +20,35 @@
  *   REPO             e.g. FINAL-Q-Bank
  *   BRANCH           e.g. progress-data
  *   PATH             e.g. user_progress.json
- *   ALLOWED_ORIGIN   e.g. https://vidhidhaduk05.github.io   (CORS origin; "*" = any)
+ *   ALLOWED_ORIGIN   e.g. https://final-q-bank.vidhidhaduk05.workers.dev
+ *                    (comma-separated list allowed, e.g. "https://a.dev,https://b.io"; "*" = any)
  */
 
 const API = "https://api.github.com";
 
-function corsHeaders(env) {
+// ALLOWED_ORIGIN may be a single origin or a comma-separated list.
+// CORS only permits one value, so we reflect the request Origin when it is on the list.
+function resolveOrigin(env, reqOrigin) {
+  const allowed = (env.ALLOWED_ORIGIN || "*").split(",").map(function (s) { return s.trim(); });
+  if (allowed.indexOf("*") !== -1) return "*";
+  if (reqOrigin && allowed.indexOf(reqOrigin) !== -1) return reqOrigin;
+  return allowed[0] || "*";
+}
+
+function corsHeaders(env, reqOrigin) {
   return {
-    "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN || "*",
+    "Access-Control-Allow-Origin": resolveOrigin(env, reqOrigin),
     "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Max-Age": "86400"
+    "Access-Control-Max-Age": "86400",
+    "Vary": "Origin"
   };
 }
 
-function json(body, status, env) {
+function json(body, status, env, reqOrigin) {
   return new Response(JSON.stringify(body), {
     status: status,
-    headers: Object.assign({ "Content-Type": "application/json" }, corsHeaders(env))
+    headers: Object.assign({ "Content-Type": "application/json" }, corsHeaders(env, reqOrigin))
   });
 }
 
@@ -114,22 +127,22 @@ async function writeProgress(env, progress, sha) {
 // --- Per-question diagram images (stored as notes/<id>.<ext> on BRANCH) ---
 const IMG_RE = /^[A-Za-z0-9|_\-]+\.(png|jpe?g|gif|webp)$/i;
 
-async function serveImage(env, name) {
-  if (!IMG_RE.test(name)) return json({ ok: false, error: "Invalid image name." }, 400, env);
+async function serveImage(env, name, reqOrigin) {
+  if (!IMG_RE.test(name)) return json({ ok: false, error: "Invalid image name." }, 400, env, reqOrigin);
   const url = API + "/repos/" + env.OWNER + "/" + env.REPO + "/contents/notes/" + name +
               "?ref=" + encodeURIComponent(env.BRANCH);
   const r = await fetch(url, { headers: Object.assign({ "Accept": "application/vnd.github.raw" }, ghHeaders(env)) });
-  if (!r.ok) return json({ ok: false, error: "Image not found (HTTP " + r.status + ")." }, r.status === 404 ? 404 : 502, env);
+  if (!r.ok) return json({ ok: false, error: "Image not found (HTTP " + r.status + ")." }, r.status === 404 ? 404 : 502, env, reqOrigin);
   const buf = await r.arrayBuffer();
   const ct = r.headers.get("content-type") || "image/png";
   return new Response(buf, {
     status: 200,
-    headers: { "Content-Type": ct, "Cache-Control": "no-cache", "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN || "*" }
+    headers: { "Content-Type": ct, "Cache-Control": "no-cache", "Access-Control-Allow-Origin": resolveOrigin(env, reqOrigin), "Vary": "Origin" }
   });
 }
 
-async function uploadImage(env, name, request) {
-  if (!IMG_RE.test(name)) return json({ ok: false, error: "Invalid image name." }, 400, env);
+async function uploadImage(env, name, request, reqOrigin) {
+  if (!IMG_RE.test(name)) return json({ ok: false, error: "Invalid image name." }, 400, env, reqOrigin);
   await ensureBranch(env);
   const buf = new Uint8Array(await request.arrayBuffer());
   let bin = "";
@@ -148,9 +161,9 @@ async function uploadImage(env, name, request) {
   if (!r.ok && r.status !== 200 && r.status !== 201) {
     let msg = "Upload failed (HTTP " + r.status + ").";
     try { const j = await r.json(); if (j.message) msg = j.message; } catch (e) {}
-    return json({ ok: false, error: msg }, 502, env);
+    return json({ ok: false, error: msg }, 502, env, reqOrigin);
   }
-  return json({ ok: true }, 200, env);
+  return json({ ok: true }, 200, env, reqOrigin);
 }
 
 export default {
@@ -158,39 +171,40 @@ export default {
     const method = request.method;
     const url = new URL(request.url);
     const path = url.pathname;
+    const reqOrigin = request.headers.get("Origin");
 
     if (method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: corsHeaders(env) });
+      return new Response(null, { status: 204, headers: corsHeaders(env, reqOrigin) });
     }
 
     // Image routes: /img/<id>.<ext>
     if (path.indexOf("/img/") === 0) {
       const name = path.slice("/img/".length);
       try {
-        if (method === "GET") return await serveImage(env, name);
-        if (method === "PUT") return await uploadImage(env, name, request);
-        return json({ ok: false, error: "Method not allowed for image." }, 405, env);
+        if (method === "GET") return await serveImage(env, name, reqOrigin);
+        if (method === "PUT") return await uploadImage(env, name, request, reqOrigin);
+        return json({ ok: false, error: "Method not allowed for image." }, 405, env, reqOrigin);
       } catch (err) {
-        return json({ ok: false, error: err.message }, 502, env);
+        return json({ ok: false, error: err.message }, 502, env, reqOrigin);
       }
     }
 
     try {
       if (method === "GET") {
         const out = await readProgress(env);
-        return json({ ok: true, progress: out.progress, sha: out.sha }, 200, env);
+        return json({ ok: true, progress: out.progress, sha: out.sha }, 200, env, reqOrigin);
       }
       if (method === "PUT") {
         const payload = await request.json();
         if (!payload || typeof payload.progress !== "object") {
-          return json({ ok: false, error: "Body must be { progress, sha }." }, 400, env);
+          return json({ ok: false, error: "Body must be { progress, sha }." }, 400, env, reqOrigin);
         }
         const out = await writeProgress(env, payload.progress, payload.sha || null);
-        return json({ ok: true, sha: out.sha }, 200, env);
+        return json({ ok: true, sha: out.sha }, 200, env, reqOrigin);
       }
-      return json({ ok: false, error: "Method not allowed." }, 405, env);
+      return json({ ok: false, error: "Method not allowed." }, 405, env, reqOrigin);
     } catch (err) {
-      return json({ ok: false, error: err.message }, 502, env);
+      return json({ ok: false, error: err.message }, 502, env, reqOrigin);
     }
   }
 };
