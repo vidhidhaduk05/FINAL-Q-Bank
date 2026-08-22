@@ -27,7 +27,7 @@
   var state = {
     questions: [],
     progress: {},          // { "ENT|1": true, ... }
-    settings: { proxyUrl: "", owner: "vidhidhaduk05", repo: "FINAL-Q-Bank", branch: "progress-data", path: "user_progress.json", token: "" },
+    settings: { proxyUrl: "", owner: "vidhidhaduk05", repo: "FINAL-Q-Bank", branch: "progress-data", path: "user_progress.json", token: "", readerMode: "list" },
     ghSha: null,           // sha of remote progress file (for update-in-place)
     ghDefaultBranch: null,
     tab: "dashboard",
@@ -41,6 +41,7 @@
     dirty: false,
     syncState: "offline",  // offline | pending | synced | error
     readerSubject: null,
+    readerCardIndex: 0,
     qMap: {}
   };
 
@@ -1098,18 +1099,53 @@
 
   /* ----------------------------- Reader tab --------------------------- */
   function renderReader() {
-    var pills = $("readerSubjects"), list = $("readerList"), countEl = $("readerCount");
+    var pills = $("readerSubjects"), list = $("readerList"), cards = $("readerCards"),
+        countEl = $("readerCount"), toggle = $("readerModeToggle");
     if (!pills) return;
+    var mode = state.settings.readerMode || "list";
     var subjects = unique(state.questions.map(function (q) { return q.subject; }));
     if (!state.readerSubject && subjects.length) state.readerSubject = subjects[0];
+
+    /* mode toggle */
+    if (toggle) {
+      toggle.innerHTML =
+        '<button class="rmt-btn' + (mode === "list" ? " active" : "") + '" data-mode="list">List</button>' +
+        '<button class="rmt-btn' + (mode === "cards" ? " active" : "") + '" data-mode="cards">Cards</button>';
+      toggle.querySelectorAll(".rmt-btn").forEach(function (b) {
+        b.addEventListener("click", function () {
+          state.settings.readerMode = b.getAttribute("data-mode");
+          saveSettings();
+          renderReader();
+        });
+      });
+    }
+
+    /* subject pills */
     pills.innerHTML = subjects.map(function (s) {
       return '<button class="pill' + (s === state.readerSubject ? " active" : "") + '" data-sub="' + esc(s) + '">' + esc(s) + "</button>";
     }).join("");
     pills.querySelectorAll(".pill").forEach(function (b) {
-      b.addEventListener("click", function () { state.readerSubject = b.getAttribute("data-sub"); renderReader(); window.scrollTo(0, 0); });
+      b.addEventListener("click", function () {
+        state.readerSubject = b.getAttribute("data-sub");
+        state.readerCardIndex = 0;
+        renderReader();
+        window.scrollTo(0, 0);
+      });
     });
+
     var qs = state.questions.filter(function (q) { return q.subject === state.readerSubject; });
     countEl.textContent = qs.length + " question" + (qs.length === 1 ? "" : "s");
+
+    if (mode === "cards") {
+      list.hidden = true;
+      if (cards) cards.hidden = false;
+      renderReaderCards(qs);
+      return;
+    }
+
+    /* ---- list mode (existing) ---- */
+    if (cards) cards.hidden = true;
+    list.hidden = false;
     var topicMap = {};
     qs.forEach(function (q) { var t = q.topic || "(untitled)"; (topicMap[t] = topicMap[t] || []).push(q); });
     var topics = Object.keys(topicMap).sort();
@@ -1159,6 +1195,188 @@
         else { ns.hidden = true; ns.innerHTML = ""; btn.textContent = (getNote(id) || getImg(id)) ? "Edit notes" : "Add notes"; }
       });
     });
+  }
+
+  /* ---- card mode ---- */
+  function renderReaderCards(qs) {
+    var container = $("readerCards");
+    if (!container) return;
+    if (!qs.length) {
+      container.innerHTML = '<div class="reader-empty">No questions in this subject.</div>';
+      return;
+    }
+    if (state.readerCardIndex >= qs.length) {
+      renderReaderSummary(qs);
+      return;
+    }
+    var q = qs[state.readerCardIndex];
+    var note = getNote(q.id);
+    var src = getImgSrc(q.id);
+    var hasNote = !!(note || src);
+    var done = isDone(q);
+    var pct = Math.round((state.readerCardIndex / qs.length) * 100);
+
+    var meta = esc(q.type || "");
+    if (q.stars) meta += " " + starsStr(q.stars);
+    if (q.is2026) meta += ' <span class="badge flag2026">2026</span>';
+    if (q.repeats > 1) meta += ' <span class="badge">x' + q.repeats + "</span>";
+    if (done) meta += ' <span class="reader-card__done-badge">Done</span>';
+
+    var notesHtml = "";
+    if (hasNote) {
+      notesHtml = '<div class="reader-card__notes">' +
+        (note ? mdToHtml(note) : "") +
+        (src ? '<div class="reader-img"><img src="' + src + '" alt="diagram"/></div>' : "") +
+      "</div>";
+    }
+
+    container.innerHTML =
+      '<div class="reader-card">' +
+        '<div class="reader-card__progress"><div class="reader-card__progress-fill" style="width:' + pct + '%"></div></div>' +
+        '<div class="reader-card__counter">' + (state.readerCardIndex + 1) + " / " + qs.length + " &middot; " + esc(state.readerSubject || "") + "</div>" +
+        '<div class="reader-card__wrap">' +
+          '<div class="reader-card__underlay reader-card__underlay--right">Done</div>' +
+          '<div class="reader-card__underlay reader-card__underlay--left">Skip</div>' +
+          '<div class="reader-card__swipe">' +
+            '<div class="reader-card__meta">' + meta + "</div>" +
+            '<div class="reader-card__q">' + esc(q.question) + "</div>" +
+            notesHtml +
+          "</div>" +
+        "</div>" +
+        '<div class="reader-card__nav">' +
+          '<button class="btn small reader-card__prev"' + (state.readerCardIndex === 0 ? " disabled" : "") + ">&larr; Prev</button>" +
+          '<span class="reader-card__hint">Swipe &rarr; done &middot; &larr; skip</span>' +
+          '<button class="btn small reader-card__next">Next &rarr;</button>' +
+        "</div>" +
+      "</div>";
+
+    /* wire swipe */
+    var swipeEl = container.querySelector(".reader-card__swipe");
+    var underlayR = container.querySelector(".reader-card__underlay--right");
+    var underlayL = container.querySelector(".reader-card__underlay--left");
+    attachSwipe(swipeEl, underlayR, underlayL, function () {
+      /* swipe right = done + advance */
+      if (!isDone(q)) {
+        setDone(q.id, true);
+        schedulePush();
+        renderDashboard();
+        renderProgress();
+      }
+      advanceCard(qs);
+    }, function () {
+      /* swipe left = skip + advance */
+      advanceCard(qs);
+    });
+
+    /* wire nav buttons */
+    var prevBtn = container.querySelector(".reader-card__prev");
+    var nextBtn = container.querySelector(".reader-card__next");
+    if (prevBtn) prevBtn.addEventListener("click", function () {
+      if (state.readerCardIndex > 0) { state.readerCardIndex--; renderReaderCards(qs); }
+    });
+    if (nextBtn) nextBtn.addEventListener("click", function () { advanceCard(qs); });
+  }
+
+  function advanceCard(qs) {
+    state.readerCardIndex++;
+    renderReaderCards(qs);
+  }
+
+  function renderReaderSummary(qs) {
+    var container = $("readerCards");
+    if (!container) return;
+    var doneCount = qs.filter(isDone).length;
+    var skipCount = qs.length - doneCount;
+    container.innerHTML =
+      '<div class="reader-summary">' +
+        '<h3 class="reader-summary__title">' + esc(state.readerSubject || "") + " &mdash; Complete!</h3>" +
+        '<div class="reader-summary__stats">' +
+          '<span class="reader-summary__stat reader-summary__stat--done">' + doneCount + " done</span>" +
+          '<span class="reader-summary__stat reader-summary__stat--skip">' + skipCount + " skipped</span>" +
+        "</div>" +
+        '<div class="reader-summary__btns">' +
+          '<button class="btn reader-summary__again">Review again</button>' +
+          '<button class="btn reader-summary__list">Back to list</button>' +
+        "</div>" +
+      "</div>";
+    container.querySelector(".reader-summary__again").addEventListener("click", function () {
+      state.readerCardIndex = 0;
+      renderReaderCards(qs);
+    });
+    container.querySelector(".reader-summary__list").addEventListener("click", function () {
+      state.settings.readerMode = "list";
+      saveSettings();
+      renderReader();
+    });
+  }
+
+  function attachSwipe(cardEl, underlayR, underlayL, onRight, onLeft) {
+    var startX = 0, startY = 0, deltaX = 0, deltaY = 0, dragging = false, horizontal = false;
+    var threshold = Math.max(80, cardEl.offsetWidth * 0.25);
+
+    function onStart(x, y) {
+      startX = x; startY = y; deltaX = 0; deltaY = 0; dragging = true; horizontal = false;
+      threshold = Math.max(80, cardEl.offsetWidth * 0.25);
+      cardEl.classList.add("swiping");
+    }
+    function onMove(x, y) {
+      if (!dragging) return;
+      deltaX = x - startX;
+      deltaY = y - startY;
+      if (!horizontal) {
+        if (Math.abs(deltaX) < Math.abs(deltaY) && Math.abs(deltaY) > 5) { dragging = false; cardEl.classList.remove("swiping"); return; }
+        if (Math.abs(deltaX) > 5) horizontal = true;
+      }
+      if (horizontal) {
+        cardEl.style.transform = "translateX(" + deltaX + "px)";
+        if (underlayR) underlayR.style.opacity = Math.min(1, deltaX / threshold);
+        if (underlayL) underlayL.style.opacity = Math.min(1, -deltaX / threshold);
+      }
+    }
+    function onEnd() {
+      if (!dragging && !horizontal) return;
+      dragging = false;
+      cardEl.classList.remove("swiping");
+      cardEl.style.transition = "transform 0.2s ease";
+      if (deltaX > threshold) {
+        /* swipe right */
+        cardEl.style.transform = "translateX(150%)";
+        if (underlayR) underlayR.style.opacity = 1;
+        setTimeout(function () { cardEl.style.transition = ""; onRight(); }, 200);
+      } else if (deltaX < -threshold) {
+        /* swipe left */
+        cardEl.style.transform = "translateX(-150%)";
+        if (underlayL) underlayL.style.opacity = 1;
+        setTimeout(function () { cardEl.style.transition = ""; onLeft(); }, 200);
+      } else {
+        /* snap back */
+        cardEl.style.transform = "";
+        if (underlayR) underlayR.style.opacity = 0;
+        if (underlayL) underlayL.style.opacity = 0;
+        setTimeout(function () { cardEl.style.transition = ""; }, 200);
+      }
+    }
+
+    /* touch */
+    cardEl.addEventListener("touchstart", function (e) {
+      var t = e.touches[0]; onStart(t.clientX, t.clientY);
+    }, { passive: true });
+    cardEl.addEventListener("touchmove", function (e) {
+      if (!dragging) return;
+      var t = e.touches[0];
+      onMove(t.clientX, t.clientY);
+      if (horizontal) e.preventDefault();
+    }, { passive: false });
+    cardEl.addEventListener("touchend", onEnd);
+    cardEl.addEventListener("touchcancel", onEnd);
+
+    /* mouse (desktop testing) */
+    cardEl.addEventListener("mousedown", function (e) {
+      onStart(e.clientX, e.clientY);
+      e.preventDefault();
+    });
+    document.addEventListener("mousemove", function (e) { if (dragging) onMove(e.clientX, e.clientY); });
+    document.addEventListener("mouseup", function (e) { if (dragging) onEnd(); });
   }
 
   function refreshAll() {
