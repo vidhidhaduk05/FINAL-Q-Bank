@@ -101,7 +101,16 @@ async function readProgress(env) {
   }
   const data = await r.json();
   let progress = {};
-  try { progress = JSON.parse(b64decode(data.content)); } catch (e) { /* keep empty */ }
+  // For files > 1 MB, GitHub API returns encoding:"none" and empty content.
+  // Fall back to download_url (raw.githubusercontent.com) to get the actual content.
+  if (data.content && data.encoding === "base64") {
+    try { progress = JSON.parse(b64decode(data.content)); } catch (e) { /* keep empty */ }
+  } else if (data.download_url) {
+    const r2 = await fetch(data.download_url, { headers: { "User-Agent": "qbank-sync-worker" } });
+    if (r2.ok) {
+      try { progress = JSON.parse(await r2.text()); } catch (e) { /* keep empty */ }
+    }
+  }
   return { progress: progress, sha: data.sha || null };
 }
 
