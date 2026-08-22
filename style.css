@@ -651,6 +651,8 @@ body.dark .note { background: var(--color-paper-dark); }
 .reader-item__notes h4, .reader-item__notes h5 { margin: 0.4rem 0 0.2rem; }
 .reader-item__notes ul, .reader-item__notes ol { margin: 0.3rem 0; padding-left: 1.3rem; }
 .reader-edit { margin-top: 0.4rem; }
+.reader-item__actions { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.4rem; }
+.reader-item.done { border-left: 3px solid var(--color-ink, #333); padding-left: 0.5rem; opacity: 0.7; }
 .reader__notes { margin-top: 0.5rem; }
 
 /* dark-mode tweaks for new components */
@@ -661,6 +663,7 @@ body.dark .pill.active { background: #ECE9E2; color: #111; border-color: #ECE9E2
 body.dark .reader-topic { background: #15151a; border-color: #2a2a30; }
 body.dark .reader-topic-h { border-bottom-color: #ECE9E2; }
 body.dark .reader-item__notes { background: #1d1d22; }
+body.dark .reader-item.done { border-left-color: #ECE9E2; }
 body.dark .notes-preview code { background: rgba(255,255,255,0.12); }
 body.dark .notes-img-thumb { background: #15151a; }
 

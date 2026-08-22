@@ -1120,17 +1120,34 @@
         var note = getNote(q.id);
         var src = getImgSrc(q.id);
         var hasNote = !!(note || src);
-        html += '<div class="reader-item" data-id="' + esc(q.id) + '">' +
+        var done = isDone(q);
+        html += '<div class="reader-item' + (done ? " done" : "") + '" data-id="' + esc(q.id) + '">' +
           '<div class="reader-item__meta">' + esc(q.type || "") + (q.stars ? " " + starsStr(q.stars) : "") + (q.is2026 ? ' <span class="badge flag2026">2026</span>' : "") + (q.repeats > 1 ? ' <span class="badge">x' + q.repeats + "</span>" : "") + "</div>" +
           '<div class="reader-item__q">' + esc(q.question) + "</div>" +
           (hasNote ? '<div class="reader-item__notes">' + (note ? mdToHtml(note) : "") + (src ? '<div class="reader-img"><img src="' + src + '" alt="diagram"/></div>' : "") + "</div>" : "") +
-          '<button class="btn small reader-edit" data-id="' + esc(q.id) + '">' + (hasNote ? "Edit notes" : "Add notes") + "</button>" +
+          '<div class="reader-item__actions">' +
+            '<label class="done-check"><input type="checkbox" class="reader-done"' + (done ? " checked" : "") + "> Done</label>" +
+            '<button class="btn small reader-edit" data-id="' + esc(q.id) + '">' + (hasNote ? "Edit notes" : "Add notes") + "</button>" +
+          "</div>" +
           '<div class="reader__notes" hidden></div>' +
         "</div>";
       });
       html += "</div>";
     });
     list.innerHTML = html;
+    // wire done checkboxes
+    list.querySelectorAll(".reader-done").forEach(function (cb) {
+      cb.addEventListener("change", function () {
+        var item = cb.closest(".reader-item");
+        var id = item.getAttribute("data-id");
+        setDone(id, this.checked);
+        item.classList.toggle("done", this.checked);
+        schedulePush();
+        renderDashboard();
+        renderProgress();
+      });
+    });
+    // wire notes buttons
     list.querySelectorAll(".reader-edit").forEach(function (btn) {
       btn.addEventListener("click", function () {
         var id = btn.getAttribute("data-id");
