@@ -29,7 +29,7 @@ and is not in the app source.
    | Text | `REPO` | `FINAL-Q-Bank` |
    | Text | `BRANCH` | `progress-data` |
    | Text | `PATH` | `user_progress.json` |
-   | Text | `ALLOWED_ORIGIN` | `https://vidhidhaduk05.github.io` |
+   | Text | `ALLOWED_ORIGIN` | `https://final-q-bank.vidhidhaduk05.workers.dev,https://vidhidhaduk05.github.io` (comma-separated; the Worker reflects whichever origin calls it) |
 6. Save. Your Worker URL is shown at the top, e.g. `https://qbank-sync.<your-subdomain>.workers.dev`.
 
 > Use a **fresh** PAT (Contents: read & write, scoped to FINAL-Q-Bank only). Do not reuse a token you have pasted anywhere else.
@@ -53,5 +53,5 @@ npx wrangler secret put GH_TOKEN   # paste your PAT when prompted
 ## Security notes
 - The token lives only in Cloudflare (server-side). The browser and the public Pages site never receive it.
 - The Worker only ever touches `user_progress.json` on the `progress-data` branch — it cannot access other files or branches.
-- `ALLOWED_ORIGIN` restricts which site can call it; set it to your Pages origin. (`*` allows any origin — fine for a personal study app, but tighter is better.)
+- `ALLOWED_ORIGIN` restricts which site can call it; set it to your app origin(s). A comma-separated list is supported — the Worker reflects the caller's origin when it is on the list. (`*` allows any origin — fine for a personal study app, but tighter is better.)
 - Anyone who knows the Worker URL could read/write your progress JSON. The data is non-sensitive (study checkboxes/notes); rotate the PAT if you ever want to lock it down further.
