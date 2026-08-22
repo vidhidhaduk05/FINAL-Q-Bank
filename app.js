@@ -39,7 +39,9 @@
     openSubjects: {},
     pushTimer: null,
     dirty: false,
-    syncState: "offline"  // offline | pending | synced | error
+    syncState: "offline",  // offline | pending | synced | error
+    readerSubject: null,
+    qMap: {}
   };
 
   /* ----------------------------- Helpers -------------------------------- */
@@ -70,7 +72,33 @@
     }
     return out.sort();
   }
-  function isDone(q) { return state.progress[q.id] === true; }
+  /* ---- Progress model: { id: { done, note, img } } (migrated from { id: true }) ---- */
+  function migrateProgress() {
+    var p = state.progress;
+    for (var k in p) {
+      if (p[k] === true) p[k] = { done: true, note: "", img: null };
+      else if (p[k] && typeof p[k] === "object") {
+        if (!("done" in p[k])) p[k].done = false;
+        if (!("note" in p[k])) p[k].note = "";
+        if (!("img" in p[k])) p[k].img = null;
+      } else { delete p[k]; }   // false / null / junk
+    }
+  }
+  function ensureProg(id) {
+    var p = state.progress[id];
+    if (!p || p === true) { p = { done: p === true, note: "", img: null }; state.progress[id] = p; }
+    return p;
+  }
+  function isDone(q) { var p = state.progress[q.id]; return !!(p && p.done); }
+  function getNote(id) { var p = state.progress[id]; return (p && p.note) || ""; }
+  function getImg(id) { var p = state.progress[id]; return (p && p.img) || null; }
+  function setDone(id, val) {
+    var p = ensureProg(id);
+    p.done = !!val;
+    if (!p.done && !p.note && !p.img) delete state.progress[id];   // prune empties
+  }
+  function setNote(id, text) { ensureProg(id).note = text || ""; }
+  function setImg(id, img) { ensureProg(id).img = img || null; }
   function toast(msg, kind) {
     var bar = $("statusBar");
     var t = el("div", "toast " + (kind || ""), esc(msg));
@@ -86,6 +114,7 @@
   function loadProgressLocal() {
     try { state.progress = JSON.parse(localStorage.getItem(LS_PROGRESS)) || {}; }
     catch (e) { state.progress = {}; }
+    migrateProgress();
   }
   function saveProgressLocal() {
     try { localStorage.setItem(LS_PROGRESS, JSON.stringify(state.progress)); } catch (e) {}
@@ -216,6 +245,7 @@
       .then(function (res) {
         state.ghSha = res.sha;
         if (res.progress) state.progress = Object.assign({}, state.progress, res.progress);
+        migrateProgress();
         saveProgressLocal();
         setSync("synced");
         if (res.fresh) { if (!silent) toast("No remote progress yet \u2014 starting fresh.", "ok"); }
@@ -303,10 +333,13 @@
       })
       .then(function (data) {
         state.questions = data || [];
+        // fast id -> question lookup for notes/reader
+        state.qMap = {};
+        for (var q = 0; q < state.questions.length; q++) state.qMap[state.questions[q].id] = state.questions[q];
         // seed progress from Excel "done" flags only if local progress empty
         if (Object.keys(state.progress).length === 0) {
           for (var i = 0; i < state.questions.length; i++) {
-            if (state.questions[i].done) state.progress[state.questions[i].id] = true;
+            if (state.questions[i].done) setDone(state.questions[i].id, true);
           }
           saveProgressLocal();
         }
@@ -326,7 +359,7 @@
   }
 
   /* ----------------------------- Tab routing --------------------------- */
-  var TABS = ["dashboard", "questions", "probability", "imp", "progress", "analytics", "settings"];
+  var TABS = ["dashboard", "questions", "reader", "probability", "imp", "progress", "analytics", "settings"];
   function showTab(tab) {
     state.tab = tab;
     TABS.forEach(function (t) {
@@ -337,7 +370,8 @@
     navs.forEach(function (a) { a.classList.toggle("active", a.getAttribute("data-tab") === tab); });
     // close mobile nav
     var mn = $("mastheadNav"); if (mn) mn.classList.remove("open");
-    // lazy render charts
+    // lazy render
+    if (tab === "reader") renderReader();
     renderActiveTabCharts();
     // scroll to top
     window.scrollTo(0, 0);
@@ -533,14 +567,20 @@
     if (q.repeats > 1) meta.push('<span class="badge">Repeats: ' + q.repeats + "</span>");
     var years = q.years.join(", ");
     if (years) meta.push('<span>' + esc(years) + "</span>");
+    var hasNote = !!(getNote(q.id) || getImg(q.id));
     return '<div class="qcard ' + (done ? "done " : "") + (imp ? "imp" : "") + '" data-id="' + esc(q.id) + '">' +
       '<div class="qcard__meta">' + meta.join("") + "</div>" +
       '<div class="qcard__topic">' + esc(q.topic || "(untitled)") + "</div>" +
       '<div class="qcard__question">' + esc(q.question) + "</div>" +
       '<div class="qcard__foot">' +
         '<div class="qcard__sources">' + esc(q.subject) + (q.sources.length ? " &middot; " + esc(q.sources.join(", ")) : "") + "</div>" +
-        '<label class="done-check"><input type="checkbox" class="qdone" ' + (done ? "checked" : "") + "> Done</label>" +
-      "</div></div>";
+        '<div class="qcard__actions">' +
+          '<label class="done-check"><input type="checkbox" class="qdone" ' + (done ? "checked" : "") + "> Done</label>" +
+          '<button class="btn small notes-btn"' + (hasNote ? ' title="Has notes"' : "") + ">Notes" + (hasNote ? ' <span class="notes-dot">\u25CF</span>' : "") + "</button>" +
+        "</div>" +
+      "</div>" +
+      '<div class="qcard__notes" hidden></div>' +
+    "</div>";
   }
 
   function renderPaged(gridId, pagId, countId, list, pageState, prefix) {
@@ -562,11 +602,23 @@
       cb.addEventListener("change", function () {
         var card = cb.closest(".qcard");
         var id = card.getAttribute("data-id");
-        if (this.checked) { state.progress[id] = true; card.classList.add("done"); }
-        else { delete state.progress[id]; card.classList.remove("done"); }
+        setDone(id, this.checked);
+        card.classList.toggle("done", this.checked);
         schedulePush();
         renderDashboard();
         renderProgress();
+      });
+    });
+    // wire notes buttons (lazy-build the editor on expand)
+    grid.querySelectorAll(".notes-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var card = btn.closest(".qcard");
+        var id = card.getAttribute("data-id");
+        var ns = card.querySelector(".qcard__notes");
+        var q = state.qMap[id];
+        if (!q || !ns) return;
+        if (ns.hidden) { ns.innerHTML = ""; ns.appendChild(buildNotesEditor(q)); ns.hidden = false; }
+        else { ns.hidden = true; ns.innerHTML = ""; }
       });
     });
 
@@ -653,10 +705,7 @@
         var cb = row.querySelector(".topic-check");
         cb.addEventListener("change", function () {
           var set = this.checked;
-          tqs.forEach(function (q) {
-            if (set) state.progress[q.id] = true;
-            else delete state.progress[q.id];
-          });
+          tqs.forEach(function (q) { setDone(q.id, set); });
           schedulePush();
           renderProgress();
           renderDashboard();
@@ -801,9 +850,304 @@
     });
   }
 
+  /* ----------------------------- Notes & diagrams --------------------- */
+  // Markdown -> safe HTML (escape first, then apply lightweight formatting)
+  function mdToHtml(md) {
+    if (!md) return "";
+    var lines = esc(md).split(/\r?\n/);
+    var html = [], inUl = false, inOl = false;
+    function closeLists() { if (inUl) { html.push("</ul>"); inUl = false; } if (inOl) { html.push("</ol>"); inOl = false; } }
+    function inline(t) {
+      t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
+      t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      t = t.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+      return t;
+    }
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (/^###\s+/.test(line)) { closeLists(); html.push("<h5>" + inline(line.replace(/^###\s+/, "")) + "</h5>"); }
+      else if (/^##\s+/.test(line)) { closeLists(); html.push("<h4>" + inline(line.replace(/^##\s+/, "")) + "</h4>"); }
+      else if (/^#\s+/.test(line)) { closeLists(); html.push("<h4>" + inline(line.replace(/^#\s+/, "")) + "</h4>"); }
+      else if (/^-\s+/.test(line)) { if (!inUl) { closeLists(); html.push("<ul>"); inUl = true; } html.push("<li>" + inline(line.replace(/^-\s+/, "")) + "</li>"); }
+      else if (/^\d+\.\s+/.test(line)) { if (!inOl) { closeLists(); html.push("<ol>"); inOl = true; } html.push("<li>" + inline(line.replace(/^\d+\.\s+/, "")) + "</li>"); }
+      else if (line.trim() === "") { closeLists(); }
+      else { closeLists(); html.push("<p>" + inline(line) + "</p>"); }
+    }
+    closeLists();
+    return html.join("");
+  }
+
+  // Image files live in the repo as notes/<slug>.<ext>; slug is filename-safe and unique per id.
+  function imgName(id, ext) {
+    return id.replace(/\|/g, "-").replace(/[^A-Za-z0-9_-]/g, "_") + "." + ext;
+  }
+  function mimeToExt(m) {
+    if (m === "image/jpeg" || m === "image/jpg") return "jpeg";
+    if (m === "image/gif") return "gif";
+    if (m === "image/webp") return "webp";
+    return "png";
+  }
+  function dataUrlToBlob(dataUrl) {
+    var parts = dataUrl.split(",");
+    var mime = (parts[0].match(/data:(.*?);/) || [, "image/png"])[1];
+    var bin = atob(parts[1]);
+    var arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime });
+  }
+  function getImgSrc(id) {
+    try { var local = localStorage.getItem("qbank_img_" + id); if (local) return local; } catch (e) {}
+    var img = getImg(id);
+    if (img && ghConfigured()) {
+      var name = imgName(id, img.type);
+      if (usingProxy()) return state.settings.proxyUrl + "/img/" + name + "?v=" + (img.updated || 0);
+      return "https://raw.githubusercontent.com/" + encodeURIComponent(state.settings.owner) + "/" +
+        encodeURIComponent(state.settings.repo) + "/" + encodeURIComponent(state.settings.branch) +
+        "/notes/" + name + "?v=" + (img.updated || 0);
+    }
+    return null;
+  }
+  function thumbHtml(id) {
+    var src = getImgSrc(id);
+    return src
+      ? '<img class="notes-thumb-img" src="' + src + '" alt="diagram"/><button class="img-del" title="Remove image">&times;</button>'
+      : '<span class="img-empty">No diagram yet</span>';
+  }
+  function fillThumb(box, id) {
+    box.innerHTML = thumbHtml(id);
+    var del = box.querySelector(".img-del");
+    if (del) del.addEventListener("click", function () { deleteImage(id); fillThumb(box, id); });
+  }
+  function updateImgThumbs(id) {
+    var boxes = document.querySelectorAll('.notes-img-thumb[data-id="' + id + '"]');
+    Array.prototype.forEach.call(boxes, function (box) { fillThumb(box, id); });
+  }
+  function saveImage(id, dataUrl) {
+    var mime = (dataUrl.match(/data:(.*?);/) || [, "image/png"])[1];
+    var ext = mimeToExt(mime);
+    try { localStorage.setItem("qbank_img_" + id, dataUrl); }
+    catch (e) { toast("Image too large to store locally.", "err"); return; }
+    setImg(id, { type: ext, updated: Date.now() });
+    saveProgressLocal();
+    schedulePush();
+    updateImgThumbs(id);
+    if (!ghConfigured()) { toast("Saved locally. Configure sync to back up diagrams.", "ok"); return; }
+    var name = imgName(id, ext);
+    if (usingProxy()) {
+      fetch(state.settings.proxyUrl + "/img/" + name, { method: "PUT", headers: { "Content-Type": mime }, body: dataUrlToBlob(dataUrl) })
+        .then(function (r) { return r.json(); })
+        .then(function (res) { if (!res.ok) toast("Diagram sync failed: " + (res.error || ""), "err"); })
+        .catch(function () { toast("Diagram sync failed (network).", "err"); });
+    } else {
+      var b64 = dataUrl.split(",")[1];
+      fetch(GH_API + "/repos/" + encodeURIComponent(state.settings.owner) + "/" + encodeURIComponent(state.settings.repo) +
+        "/contents/notes/" + name + "?ref=" + encodeURIComponent(state.settings.branch), { headers: ghHeaders() })
+        .then(function (r) { if (r.ok) return r.json().then(function (d) { return d.sha; }); return null; })
+        .then(function (sha) {
+          var body = { message: "Add diagram " + name, content: b64, branch: state.settings.branch };
+          if (sha) body.sha = sha;
+          return fetch(GH_API + "/repos/" + encodeURIComponent(state.settings.owner) + "/" + encodeURIComponent(state.settings.repo) +
+            "/contents/notes/" + name, { method: "PUT", headers: Object.assign({ "Content-Type": "application/json" }, ghHeaders()), body: JSON.stringify(body) });
+        })
+        .then(function (r) { if (!r.ok && r.status !== 200 && r.status !== 201) toast("Diagram sync failed (HTTP " + r.status + ").", "err"); })
+        .catch(function () { toast("Diagram sync failed (network).", "err"); });
+    }
+  }
+  function deleteImage(id) {
+    try { localStorage.removeItem("qbank_img_" + id); } catch (e) {}
+    setImg(id, null);
+    var p = state.progress[id];
+    if (p && !p.done && !p.note) delete state.progress[id];
+    saveProgressLocal();
+    schedulePush();
+    updateImgThumbs(id);
+  }
+
+  // Simple drawing dialog -> PNG -> saveImage
+  function openDrawDialog(id) {
+    var overlay = el("div", "draw-overlay");
+    overlay.innerHTML =
+      '<div class="draw-dialog">' +
+        '<h3>Draw diagram</h3>' +
+        '<canvas class="draw-canvas" width="640" height="360"></canvas>' +
+        '<div class="draw-tools">' +
+          '<button class="dcolor active" data-c="#111111" style="background:#111"></button>' +
+          '<button class="dcolor" data-c="#c0392b" style="background:#c0392b"></button>' +
+          '<button class="dcolor" data-c="#2980b9" style="background:#2980b9"></button>' +
+          '<button class="dcolor" data-c="#27ae60" style="background:#27ae60"></button>' +
+          '<label class="dsize">Size <input type="range" min="1" max="24" value="3"></label>' +
+          '<button class="btn small" data-act="eraser">Eraser</button>' +
+          '<button class="btn small" data-act="clear">Clear</button>' +
+        '</div>' +
+        '<div class="draw-foot">' +
+          '<button class="btn" data-act="cancel">Cancel</button>' +
+          '<button class="btn accent" data-act="save">Save to notes</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    var canvas = overlay.querySelector("canvas");
+    var ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    var drawing = false, color = "#111111", size = 3, eraser = false, last = null;
+    function pos(e) {
+      var r = canvas.getBoundingClientRect();
+      var t = e.touches ? e.touches[0] : e;
+      return { x: (t.clientX - r.left) * (canvas.width / r.width), y: (t.clientY - r.top) * (canvas.height / r.height) };
+    }
+    function start(e) { e.preventDefault(); drawing = true; last = pos(e); }
+    function move(e) { if (!drawing) return; e.preventDefault(); var p = pos(e); ctx.strokeStyle = eraser ? "#ffffff" : color; ctx.lineWidth = eraser ? size * 3 : size; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p; }
+    function end() { drawing = false; }
+    canvas.addEventListener("mousedown", start); canvas.addEventListener("mousemove", move); window.addEventListener("mouseup", end);
+    canvas.addEventListener("touchstart", start); canvas.addEventListener("touchmove", move); canvas.addEventListener("touchend", end);
+    overlay.querySelectorAll(".dcolor").forEach(function (b) {
+      b.addEventListener("click", function () {
+        eraser = false; color = b.getAttribute("data-c");
+        overlay.querySelector('[data-act="eraser"]').classList.remove("active");
+        overlay.querySelectorAll(".dcolor").forEach(function (x) { x.classList.remove("active"); });
+        b.classList.add("active");
+      });
+    });
+    overlay.querySelector(".dsize input").addEventListener("input", function () { size = parseInt(this.value, 10); });
+    overlay.querySelector('[data-act="eraser"]').addEventListener("click", function () { eraser = !eraser; this.classList.toggle("active", eraser); });
+    overlay.querySelector('[data-act="clear"]').addEventListener("click", function () { ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, canvas.width, canvas.height); });
+    overlay.querySelector('[data-act="cancel"]').addEventListener("click", function () { document.body.removeChild(overlay); });
+    overlay.querySelector('[data-act="save"]').addEventListener("click", function () {
+      saveImage(id, canvas.toDataURL("image/png"));
+      updateImgThumbs(id);
+      document.body.removeChild(overlay);
+      toast("Diagram saved.", "ok");
+    });
+  }
+
+  // Build a notes editor element (Write/Preview tabs, markdown textarea, image controls)
+  function buildNotesEditor(q) {
+    var id = q.id;
+    var ed = el("div", "notes-editor");
+    ed.innerHTML =
+      '<div class="notes-tabs">' +
+        '<button class="ntab active" data-mode="write">Write</button>' +
+        '<button class="ntab" data-mode="preview">Preview</button>' +
+      '</div>' +
+      '<div class="notes-write">' +
+        '<textarea class="notes-ta" placeholder="Write your answer notes... Markdown: **bold**, *italic*, - bullet, 1. numbered, # heading"></textarea>' +
+        '<div class="notes-img-row">' +
+          '<div class="notes-img-thumb" data-id="' + esc(id) + '"></div>' +
+          '<div class="notes-img-btns">' +
+            '<button class="btn small" data-act="upload">Upload image</button>' +
+            '<button class="btn small" data-act="draw">Draw diagram</button>' +
+            '<input type="file" class="notes-file" accept="image/*" hidden>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="notes-preview" hidden></div>' +
+      '<div class="notes-foot"><span class="notes-hint">Auto-saved</span>' +
+        '<button class="btn small" data-act="collapse">Collapse</button></div>';
+    var ta = ed.querySelector(".notes-ta");
+    ta.value = getNote(id);
+    var saveTimer = null;
+    ta.addEventListener("input", function () {
+      setNote(id, ta.value);
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(function () { saveProgressLocal(); schedulePush(); }, 800);
+    });
+    ed.querySelectorAll(".ntab").forEach(function (b) {
+      b.addEventListener("click", function () {
+        ed.querySelectorAll(".ntab").forEach(function (x) { x.classList.remove("active"); });
+        b.classList.add("active");
+        var mode = b.getAttribute("data-mode");
+        ed.querySelector(".notes-write").hidden = (mode !== "write");
+        var pv = ed.querySelector(".notes-preview");
+        pv.hidden = (mode !== "preview");
+        if (mode === "preview") {
+          var src = getImgSrc(id);
+          pv.innerHTML = mdToHtml(getNote(id)) + (src ? '<div class="notes-preview-img"><img src="' + src + '" alt="diagram"/></div>' : "");
+        }
+      });
+    });
+    var file = ed.querySelector(".notes-file");
+    ed.querySelector('[data-act="upload"]').addEventListener("click", function () { file.click(); });
+    file.addEventListener("change", function () {
+      if (!file.files[0]) return;
+      var r = new FileReader();
+      r.onload = function () { saveImage(id, r.result); toast("Image added.", "ok"); };
+      r.readAsDataURL(file.files[0]);
+      file.value = "";
+    });
+    ed.querySelector('[data-act="draw"]').addEventListener("click", function () { openDrawDialog(id); });
+    ta.addEventListener("paste", function (e) {
+      var items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf("image/") === 0) {
+          e.preventDefault();
+          var blob = items[i].getAsFile();
+          var r = new FileReader();
+          r.onload = function () { saveImage(id, r.result); toast("Pasted image added.", "ok"); };
+          r.readAsDataURL(blob);
+          break;
+        }
+      }
+    });
+    ed.querySelector('[data-act="collapse"]').addEventListener("click", function () {
+      var box = ed.parentNode;
+      if (box) { box.hidden = true; box.innerHTML = ""; }
+    });
+    fillThumb(ed.querySelector(".notes-img-thumb"), id);
+    return ed;
+  }
+
+  /* ----------------------------- Reader tab --------------------------- */
+  function renderReader() {
+    var pills = $("readerSubjects"), list = $("readerList"), countEl = $("readerCount");
+    if (!pills) return;
+    var subjects = unique(state.questions.map(function (q) { return q.subject; }));
+    if (!state.readerSubject && subjects.length) state.readerSubject = subjects[0];
+    pills.innerHTML = subjects.map(function (s) {
+      return '<button class="pill' + (s === state.readerSubject ? " active" : "") + '" data-sub="' + esc(s) + '">' + esc(s) + "</button>";
+    }).join("");
+    pills.querySelectorAll(".pill").forEach(function (b) {
+      b.addEventListener("click", function () { state.readerSubject = b.getAttribute("data-sub"); renderReader(); window.scrollTo(0, 0); });
+    });
+    var qs = state.questions.filter(function (q) { return q.subject === state.readerSubject; });
+    countEl.textContent = qs.length + " question" + (qs.length === 1 ? "" : "s");
+    var topicMap = {};
+    qs.forEach(function (q) { var t = q.topic || "(untitled)"; (topicMap[t] = topicMap[t] || []).push(q); });
+    var topics = Object.keys(topicMap).sort();
+    var html = "";
+    topics.forEach(function (t) {
+      html += '<div class="reader-topic"><h3 class="reader-topic-h">' + esc(t) + ' <span class="reader-topic-c">' + topicMap[t].length + "</span></h3>";
+      topicMap[t].forEach(function (q) {
+        var note = getNote(q.id);
+        var src = getImgSrc(q.id);
+        var hasNote = !!(note || src);
+        html += '<div class="reader-item" data-id="' + esc(q.id) + '">' +
+          '<div class="reader-item__meta">' + esc(q.type || "") + (q.stars ? " " + starsStr(q.stars) : "") + (q.is2026 ? ' <span class="badge flag2026">2026</span>' : "") + (q.repeats > 1 ? ' <span class="badge">x' + q.repeats + "</span>" : "") + "</div>" +
+          '<div class="reader-item__q">' + esc(q.question) + "</div>" +
+          (hasNote ? '<div class="reader-item__notes">' + (note ? mdToHtml(note) : "") + (src ? '<div class="reader-img"><img src="' + src + '" alt="diagram"/></div>' : "") + "</div>" : "") +
+          '<button class="btn small reader-edit" data-id="' + esc(q.id) + '">' + (hasNote ? "Edit notes" : "Add notes") + "</button>" +
+          '<div class="reader__notes" hidden></div>' +
+        "</div>";
+      });
+      html += "</div>";
+    });
+    list.innerHTML = html;
+    list.querySelectorAll(".reader-edit").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-id");
+        var item = btn.closest(".reader-item");
+        var ns = item.querySelector(".reader__notes");
+        var q = state.qMap[id];
+        if (!q || !ns) return;
+        if (ns.hidden) { ns.innerHTML = ""; ns.appendChild(buildNotesEditor(q)); ns.hidden = false; btn.textContent = "Hide notes"; }
+        else { ns.hidden = true; ns.innerHTML = ""; btn.textContent = (getNote(id) || getImg(id)) ? "Edit notes" : "Add notes"; }
+      });
+    });
+  }
+
   function refreshAll() {
     renderDashboard();
     renderQuestions();
+    renderReader();
     renderImp();
     renderProgress();
     renderActiveTabCharts();

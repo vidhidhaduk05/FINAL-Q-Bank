@@ -28,6 +28,7 @@
     <nav class="masthead__nav" id="mastheadNav">
       <a href="#dashboard"   class="active" data-tab="dashboard">Dashboard</a>
       <a href="#questions"   data-tab="questions">Questions</a>
+      <a href="#reader"      data-tab="reader">Reader</a>
       <a href="#probability" data-tab="probability">Probability</a>
       <a href="#imp"         data-tab="imp">IMP Questions</a>
       <a href="#progress"    data-tab="progress">Progress</a>
@@ -119,6 +120,18 @@
       </section>
 
       <!-- ---------------- SETTINGS ---------------- -->
+      <section id="tab-reader" class="tab-section">
+        <div class="section-head">
+          <h2>Reader</h2>
+          <span class="kicker">Subject-wise study view &middot; scroll through questions with your notes</span>
+        </div>
+        <div class="reader-controls">
+          <div class="subject-pills" id="readerSubjects"></div>
+          <div class="reader-count" id="readerCount"></div>
+        </div>
+        <div class="reader-list" id="readerList"></div>
+      </section>
+
       <section id="tab-settings" class="tab-section">
         <div class="section-head">
           <h2>Settings</h2>

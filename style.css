@@ -593,3 +593,79 @@ body.dark .note { background: var(--color-paper-dark); }
   .stat-card .stat-value { font-size: 1.6rem; }
   .chart-wrap { height: 260px; }
 }
+
+/* ============================ NOTES EDITOR ============================ */
+.qcard__actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.notes-btn { font-size: 0.8rem; }
+.notes-dot { color: #E9ED4C; font-size: 0.7rem; }
+.qcard__notes { margin-top: 0.6rem; border-top: 1px dashed var(--border, #ccc); padding-top: 0.6rem; }
+
+.notes-editor { background: var(--card-bg-2, #f7f5ee); border: 1px solid var(--border, #ddd); border-radius: 6px; padding: 0.6rem; }
+.notes-tabs { display: flex; gap: 0.3rem; margin-bottom: 0.5rem; }
+.ntab { border: 1px solid var(--border, #ccc); background: transparent; padding: 0.25rem 0.7rem; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+.ntab.active { background: #111; color: #fff; border-color: #111; }
+.notes-ta { width: 100%; min-height: 120px; box-sizing: border-box; border: 1px solid var(--border, #ccc); border-radius: 4px; padding: 0.5rem; font-family: "Source Sans 3", sans-serif; font-size: 0.9rem; resize: vertical; background: var(--card-bg, #fff); color: var(--text, #111); }
+.notes-preview { font-size: 0.9rem; line-height: 1.5; min-height: 120px; }
+.notes-preview h4, .notes-preview h5 { margin: 0.4rem 0 0.2rem; }
+.notes-preview p { margin: 0.3rem 0; }
+.notes-preview ul, .notes-preview ol { margin: 0.3rem 0; padding-left: 1.3rem; }
+.notes-preview code { background: rgba(0,0,0,0.08); padding: 0 0.2rem; border-radius: 3px; font-size: 0.85em; }
+.notes-preview-img img, .reader-img img { max-width: 100%; border: 1px solid var(--border, #ddd); border-radius: 4px; margin-top: 0.4rem; }
+
+.notes-img-row { display: flex; gap: 0.6rem; align-items: flex-start; margin-top: 0.5rem; flex-wrap: wrap; }
+.notes-img-thumb { position: relative; width: 120px; min-height: 60px; border: 1px dashed var(--border, #bbb); border-radius: 4px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--card-bg, #fff); }
+.notes-img-thumb img.notes-thumb-img { width: 100%; height: auto; display: block; }
+.notes-img-thumb .img-empty { font-size: 0.72rem; color: #999; padding: 0.3rem; text-align: center; }
+.img-del { position: absolute; top: 2px; right: 2px; background: rgba(0,0,0,0.6); color: #fff; border: none; border-radius: 50%; width: 18px; height: 18px; line-height: 16px; text-align: center; cursor: pointer; font-size: 0.8rem; padding: 0; }
+.notes-img-btns { display: flex; gap: 0.3rem; flex-wrap: wrap; align-items: center; }
+.notes-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem; }
+.notes-hint { font-size: 0.72rem; color: #888; }
+
+/* ============================ DRAW DIALOG ============================ */
+.draw-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem; }
+.draw-dialog { background: var(--card-bg, #fff); color: var(--text, #111); border-radius: 8px; padding: 1rem; max-width: 680px; width: 100%; box-sizing: border-box; }
+.draw-dialog h3 { margin: 0 0 0.6rem; }
+.draw-canvas { width: 100%; height: auto; border: 1px solid var(--border, #ccc); border-radius: 4px; background: #fff; touch-action: none; cursor: crosshair; }
+.draw-tools { display: flex; gap: 0.4rem; align-items: center; margin: 0.6rem 0; flex-wrap: wrap; }
+.dcolor { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+.dcolor.active { border-color: #333; }
+.dsize { font-size: 0.8rem; display: flex; align-items: center; gap: 0.3rem; }
+.draw-foot { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.4rem; }
+
+/* ============================ READER TAB ============================ */
+.reader-controls { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 0.8rem; }
+.subject-pills { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.pill { border: 1px solid var(--border, #ccc); background: transparent; color: var(--text, #111); padding: 0.3rem 0.7rem; border-radius: 16px; cursor: pointer; font-size: 0.8rem; }
+.pill.active { background: #111; color: #fff; border-color: #111; }
+.reader-count { font-size: 0.8rem; color: #777; }
+.reader-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.reader-topic { border: 1px solid var(--border, #e2dfd4); border-radius: 6px; padding: 0.2rem 0.8rem 0.6rem; background: var(--card-bg, #fff); margin-bottom: 0.5rem; }
+.reader-topic-h { font-size: 1rem; margin: 0.4rem 0 0.3rem; padding-bottom: 0.25rem; border-bottom: 2px solid #111; font-family: "Source Serif 4", serif; }
+.reader-topic-c { font-size: 0.7rem; color: #888; font-weight: 400; }
+.reader-item { padding: 0.5rem 0; border-bottom: 1px dotted var(--border, #e0ddd2); }
+.reader-item:last-child { border-bottom: none; }
+.reader-item__meta { font-size: 0.72rem; color: #888; margin-bottom: 0.2rem; }
+.reader-item__q { font-size: 0.92rem; line-height: 1.45; }
+.reader-item__notes { margin-top: 0.4rem; padding: 0.5rem; background: var(--card-bg-2, #f7f5ee); border-left: 3px solid #E9ED4C; border-radius: 0 4px 4px 0; font-size: 0.88rem; line-height: 1.5; }
+.reader-item__notes p { margin: 0.3rem 0; }
+.reader-item__notes h4, .reader-item__notes h5 { margin: 0.4rem 0 0.2rem; }
+.reader-item__notes ul, .reader-item__notes ol { margin: 0.3rem 0; padding-left: 1.3rem; }
+.reader-edit { margin-top: 0.4rem; }
+.reader__notes { margin-top: 0.5rem; }
+
+/* dark-mode tweaks for new components */
+body.dark .notes-editor { background: #1d1d22; border-color: #333; }
+body.dark .notes-ta { background: #15151a; color: #e8e8e8; border-color: #333; }
+body.dark .ntab.active { background: #ECE9E2; color: #111; border-color: #ECE9E2; }
+body.dark .pill.active { background: #ECE9E2; color: #111; border-color: #ECE9E2; }
+body.dark .reader-topic { background: #15151a; border-color: #2a2a30; }
+body.dark .reader-topic-h { border-bottom-color: #ECE9E2; }
+body.dark .reader-item__notes { background: #1d1d22; }
+body.dark .notes-preview code { background: rgba(255,255,255,0.12); }
+body.dark .notes-img-thumb { background: #15151a; }
+
+@media (max-width: 640px) {
+  .notes-img-row { flex-direction: column; }
+  .notes-img-thumb { width: 100%; }
+  .draw-dialog { padding: 0.6rem; }
+}

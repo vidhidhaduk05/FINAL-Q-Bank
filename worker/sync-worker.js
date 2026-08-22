@@ -111,12 +111,68 @@ async function writeProgress(env, progress, sha) {
   return { sha: (data.content && data.content.sha) || null };
 }
 
+// --- Per-question diagram images (stored as notes/<id>.<ext> on BRANCH) ---
+const IMG_RE = /^[A-Za-z0-9|_\-]+\.(png|jpe?g|gif|webp)$/i;
+
+async function serveImage(env, name) {
+  if (!IMG_RE.test(name)) return json({ ok: false, error: "Invalid image name." }, 400, env);
+  const url = API + "/repos/" + env.OWNER + "/" + env.REPO + "/contents/notes/" + name +
+              "?ref=" + encodeURIComponent(env.BRANCH);
+  const r = await fetch(url, { headers: Object.assign({ "Accept": "application/vnd.github.raw" }, ghHeaders(env)) });
+  if (!r.ok) return json({ ok: false, error: "Image not found (HTTP " + r.status + ")." }, r.status === 404 ? 404 : 502, env);
+  const buf = await r.arrayBuffer();
+  const ct = r.headers.get("content-type") || "image/png";
+  return new Response(buf, {
+    status: 200,
+    headers: { "Content-Type": ct, "Cache-Control": "no-cache", "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN || "*" }
+  });
+}
+
+async function uploadImage(env, name, request) {
+  if (!IMG_RE.test(name)) return json({ ok: false, error: "Invalid image name." }, 400, env);
+  await ensureBranch(env);
+  const buf = new Uint8Array(await request.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+  const content = btoa(bin);
+  // look up existing sha so we update in place
+  let sha = null;
+  const check = await fetch(API + "/repos/" + env.OWNER + "/" + env.REPO + "/contents/notes/" + name +
+    "?ref=" + encodeURIComponent(env.BRANCH), { headers: ghHeaders(env) });
+  if (check.ok) { const d = await check.json(); sha = d.sha; }
+  const r = await fetch(API + "/repos/" + env.OWNER + "/" + env.REPO + "/contents/notes/" + name, {
+    method: "PUT",
+    headers: Object.assign({ "Content-Type": "application/json" }, ghHeaders(env)),
+    body: JSON.stringify({ message: "Add diagram " + name, content: content, branch: env.BRANCH, sha: sha })
+  });
+  if (!r.ok && r.status !== 200 && r.status !== 201) {
+    let msg = "Upload failed (HTTP " + r.status + ").";
+    try { const j = await r.json(); if (j.message) msg = j.message; } catch (e) {}
+    return json({ ok: false, error: msg }, 502, env);
+  }
+  return json({ ok: true }, 200, env);
+}
+
 export default {
   async fetch(request, env) {
     const method = request.method;
+    const url = new URL(request.url);
+    const path = url.pathname;
 
     if (method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders(env) });
+    }
+
+    // Image routes: /img/<id>.<ext>
+    if (path.indexOf("/img/") === 0) {
+      const name = path.slice("/img/".length);
+      try {
+        if (method === "GET") return await serveImage(env, name);
+        if (method === "PUT") return await uploadImage(env, name, request);
+        return json({ ok: false, error: "Method not allowed for image." }, 405, env);
+      } catch (err) {
+        return json({ ok: false, error: err.message }, 502, env);
+      }
     }
 
     try {
