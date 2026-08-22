@@ -56,6 +56,7 @@ function ghHeaders(env) {
   return {
     "Authorization": "Bearer " + env.GH_TOKEN,
     "Accept": "application/vnd.github+json",
+    "User-Agent": "qbank-sync-worker",   // GitHub rejects API calls without a User-Agent (403)
     "X-GitHub-Api-Version": "2022-11-28"
   };
 }
@@ -93,7 +94,11 @@ async function readProgress(env) {
               "?ref=" + encodeURIComponent(env.BRANCH);
   const r = await fetch(url, { headers: ghHeaders(env) });
   if (r.status === 404) return { progress: {}, sha: null };          // no remote file yet -> start fresh
-  if (!r.ok) throw new Error("Pull failed (HTTP " + r.status + ").");
+  if (!r.ok) {
+    let detail = "";
+    try { const t = await r.text(); detail = " Body: " + t.slice(0, 300); } catch (e) {}
+    throw new Error("Pull failed (HTTP " + r.status + ")." + detail);
+  }
   const data = await r.json();
   let progress = {};
   try { progress = JSON.parse(b64decode(data.content)); } catch (e) { /* keep empty */ }
@@ -131,10 +136,12 @@ async function serveImage(env, name, reqOrigin) {
   if (!IMG_RE.test(name)) return json({ ok: false, error: "Invalid image name." }, 400, env, reqOrigin);
   const url = API + "/repos/" + env.OWNER + "/" + env.REPO + "/contents/notes/" + name +
               "?ref=" + encodeURIComponent(env.BRANCH);
-  const r = await fetch(url, { headers: Object.assign({ "Accept": "application/vnd.github.raw" }, ghHeaders(env)) });
+  const r = await fetch(url, { headers: Object.assign({}, ghHeaders(env), { "Accept": "application/vnd.github.raw" }) });
   if (!r.ok) return json({ ok: false, error: "Image not found (HTTP " + r.status + ")." }, r.status === 404 ? 404 : 502, env, reqOrigin);
   const buf = await r.arrayBuffer();
-  const ct = r.headers.get("content-type") || "image/png";
+  const ext = name.split(".").pop().toLowerCase();
+  const ctMap = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
+  const ct = ctMap[ext] || "image/png";
   return new Response(buf, {
     status: 200,
     headers: { "Content-Type": ct, "Cache-Control": "no-cache", "Access-Control-Allow-Origin": resolveOrigin(env, reqOrigin), "Vary": "Origin" }
