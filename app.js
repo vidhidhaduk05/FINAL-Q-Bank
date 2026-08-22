@@ -27,7 +27,7 @@
   var state = {
     questions: [],
     progress: {},          // { "ENT|1": true, ... }
-    settings: { owner: "", repo: "", branch: "progress-data", path: "user_progress.json", token: "" },
+    settings: { owner: "vidhidhaduk05", repo: "FINAL-Q-Bank", branch: "progress-data", path: "user_progress.json", token: "" },
     ghSha: null,           // sha of remote progress file (for update-in-place)
     ghDefaultBranch: null,
     tab: "dashboard",
