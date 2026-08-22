@@ -27,7 +27,7 @@
   var state = {
     questions: [],
     progress: {},          // { "ENT|1": true, ... }
-    settings: { owner: "vidhidhaduk05", repo: "FINAL-Q-Bank", branch: "progress-data", path: "user_progress.json", token: "" },
+    settings: { proxyUrl: "", owner: "vidhidhaduk05", repo: "FINAL-Q-Bank", branch: "progress-data", path: "user_progress.json", token: "" },
     ghSha: null,           // sha of remote progress file (for update-in-place)
     ghDefaultBranch: null,
     tab: "dashboard",
@@ -101,8 +101,10 @@
   }
   function ghConfigured() {
     var s = state.settings;
-    return !!(s.owner && s.repo && s.token);
+    // Proxy mode (token held server-side by the Worker) OR direct mode (owner+repo+token).
+    return !!(s.proxyUrl || (s.owner && s.repo && s.token));
   }
+  function usingProxy() { return !!state.settings.proxyUrl; }
 
   /* ----------------------------- Theme --------------------------------- */
   function applyTheme(theme) {
@@ -188,23 +190,36 @@
 
   function pullFromGitHub(silent) {
     if (!ghConfigured()) { if (!silent) toast("GitHub not configured.", "err"); return Promise.resolve(); }
-    return fetch(ghContentsUrl(true), { headers: ghHeaders() })
-      .then(function (r) {
-        if (r.status === 404) { state.ghSha = null; if (!silent) toast("No remote progress yet — starting fresh.", "ok"); return null; }
-        if (!r.ok) throw new Error("Pull failed (HTTP " + r.status + ").");
-        return r.json();
-      })
-      .then(function (data) {
-        if (!data) { saveProgressLocal(); return; }
-        state.ghSha = data.sha || null;
-        try {
-          var remote = JSON.parse(b64decode(data.content || ""));
-          // merge: remote wins for keys present; keep local-only keys too
-          state.progress = Object.assign({}, state.progress, remote);
-        } catch (e) { /* keep local */ }
+    var req;
+    if (usingProxy()) {
+      // Proxy mode: Worker returns { ok, progress, sha } directly (no base64 / GitHub API).
+      req = fetch(state.settings.proxyUrl, { headers: { "Accept": "application/json" } })
+        .then(function (r) { if (!r.ok) throw new Error("Proxy pull failed (HTTP " + r.status + ")."); return r.json(); })
+        .then(function (res) {
+          if (!res.ok) throw new Error(res.error || "Proxy pull error.");
+          return { sha: res.sha || null, progress: res.progress || {}, fresh: false };
+        });
+    } else {
+      // Direct mode: GitHub Contents API.
+      req = fetch(ghContentsUrl(true), { headers: ghHeaders() })
+        .then(function (r) {
+          if (r.status === 404) { return { sha: null, progress: null, fresh: true }; }
+          if (!r.ok) throw new Error("Pull failed (HTTP " + r.status + ").");
+          return r.json().then(function (data) {
+            var p = {};
+            try { p = JSON.parse(b64decode(data.content || "")); } catch (e) {}
+            return { sha: data.sha || null, progress: p, fresh: false };
+          });
+        });
+    }
+    return req
+      .then(function (res) {
+        state.ghSha = res.sha;
+        if (res.progress) state.progress = Object.assign({}, state.progress, res.progress);
         saveProgressLocal();
         setSync("synced");
-        if (!silent) toast("Pulled progress from GitHub.", "ok");
+        if (res.fresh) { if (!silent) toast("No remote progress yet \u2014 starting fresh.", "ok"); }
+        else if (!silent) toast("Pulled progress from GitHub.", "ok");
         refreshAll();
       })
       .catch(function (err) {
@@ -216,29 +231,46 @@
   function pushToGitHub(silent) {
     if (!ghConfigured()) { saveProgressLocal(); setSync("offline"); return Promise.resolve(); }
     setSync("pending");
-    return ensureBranch()
-      .then(function () {
-        var body = {
-          message: "Update Q-Bank progress (" + new Date().toISOString().slice(0, 19) + "Z)",
-          content: b64encode(JSON.stringify(state.progress)),
-          branch: state.settings.branch
-        };
-        if (state.ghSha) body.sha = state.ghSha;
-        return fetch(ghContentsUrl(false), {
-          method: "PUT",
-          headers: Object.assign({ "Content-Type": "application/json" }, ghHeaders()),
-          body: JSON.stringify(body)
+    var req;
+    if (usingProxy()) {
+      // Proxy mode: Worker handles branch creation + GitHub PUT; app sends plain progress + sha.
+      req = fetch(state.settings.proxyUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ progress: state.progress, sha: state.ghSha })
+      })
+        .then(function (r) { if (!r.ok) throw new Error("Proxy push failed (HTTP " + r.status + ")."); return r.json(); })
+        .then(function (res) {
+          if (!res.ok) throw new Error(res.error || "Proxy push error.");
+          return { sha: res.sha || state.ghSha };
         });
-      })
-      .then(function (r) {
-        if (r.status === 409) throw new Error("Conflict — pulling fresh copy first.");
-        if (!r.ok && r.status !== 201 && r.status !== 200) {
-          return r.json().then(function (j) { throw new Error(j.message || ("Push failed HTTP " + r.status)); });
-        }
-        return r.json();
-      })
-      .then(function (data) {
-        state.ghSha = (data && data.content && data.content.sha) || state.ghSha;
+    } else {
+      // Direct mode: GitHub Contents API.
+      req = ensureBranch()
+        .then(function () {
+          var body = {
+            message: "Update Q-Bank progress (" + new Date().toISOString().slice(0, 19) + "Z)",
+            content: b64encode(JSON.stringify(state.progress)),
+            branch: state.settings.branch
+          };
+          if (state.ghSha) body.sha = state.ghSha;
+          return fetch(ghContentsUrl(false), {
+            method: "PUT",
+            headers: Object.assign({ "Content-Type": "application/json" }, ghHeaders()),
+            body: JSON.stringify(body)
+          });
+        })
+        .then(function (r) {
+          if (r.status === 409) throw new Error("Conflict \u2014 pulling fresh copy first.");
+          if (!r.ok && r.status !== 201 && r.status !== 200) {
+            return r.json().then(function (j) { throw new Error(j.message || ("Push failed HTTP " + r.status)); });
+          }
+          return r.json().then(function (data) { return { sha: (data && data.content && data.content.sha) || state.ghSha }; });
+        });
+    }
+    return req
+      .then(function (res) {
+        state.ghSha = res.sha;
         state.dirty = false;
         setSync("synced");
         if (!silent) toast("Progress saved to GitHub.", "ok");
@@ -780,6 +812,7 @@
   /* ----------------------------- Settings UI --------------------------- */
   function fillSettingsForm() {
     var s = state.settings;
+    $("ghProxy").value = s.proxyUrl || "";
     $("ghOwner").value = s.owner || "";
     $("ghRepo").value = s.repo || "";
     $("ghBranch").value = s.branch || "progress-data";
@@ -787,6 +820,7 @@
     $("ghToken").value = s.token || "";
   }
   function readSettingsForm() {
+    state.settings.proxyUrl = $("ghProxy").value.trim();
     state.settings.owner = $("ghOwner").value.trim();
     state.settings.repo = $("ghRepo").value.trim();
     state.settings.branch = $("ghBranch").value.trim() || "progress-data";
@@ -856,19 +890,31 @@
     });
     $("btnTestConn").addEventListener("click", function () {
       readSettingsForm();
-      if (!ghConfigured()) { toast("Enter owner, repo, and token first.", "err"); return; }
+      if (!ghConfigured()) { toast("Enter a proxy URL, or owner + repo + token.", "err"); return; }
       setSync("pending");
-      fetch(GH_API + "/repos/" + encodeURIComponent(state.settings.owner) + "/" + encodeURIComponent(state.settings.repo), { headers: ghHeaders() })
-        .then(function (r) {
-          if (!r.ok) throw new Error("HTTP " + r.status);
-          return r.json();
-        })
-        .then(function (repo) {
-          state.ghDefaultBranch = repo.default_branch;
-          toast("Connected. Default branch: " + repo.default_branch + ". Repo: " + repo.full_name, "ok");
-          setSync("synced");
-        })
-        .catch(function (err) { setSync("error"); toast("Connection failed: " + err.message, "err"); });
+      if (usingProxy()) {
+        // Proxy mode: a successful GET read confirms the Worker + token are wired up.
+        fetch(state.settings.proxyUrl, { headers: { "Accept": "application/json" } })
+          .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+          .then(function (res) {
+            if (!res.ok) throw new Error(res.error || "Proxy error");
+            toast("Proxy connected. Remote progress entries: " + Object.keys(res.progress || {}).length, "ok");
+            setSync("synced");
+          })
+          .catch(function (err) { setSync("error"); toast("Connection failed: " + err.message, "err"); });
+      } else {
+        fetch(GH_API + "/repos/" + encodeURIComponent(state.settings.owner) + "/" + encodeURIComponent(state.settings.repo), { headers: ghHeaders() })
+          .then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return r.json();
+          })
+          .then(function (repo) {
+            state.ghDefaultBranch = repo.default_branch;
+            toast("Connected. Default branch: " + repo.default_branch + ". Repo: " + repo.full_name, "ok");
+            setSync("synced");
+          })
+          .catch(function (err) { setSync("error"); toast("Connection failed: " + err.message, "err"); });
+      }
     });
     $("btnPull").addEventListener("click", function () { pullFromGitHub(false); });
     $("btnPush").addEventListener("click", function () {

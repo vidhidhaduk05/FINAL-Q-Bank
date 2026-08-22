@@ -128,6 +128,11 @@
           <div class="settings-card">
             <h3>GitHub Sync</h3>
             <div class="form-field">
+              <label for="ghProxy">Sync Proxy URL <span style="font-weight:normal;font-size:.85em">(optional, recommended)</span></label>
+              <input type="text" id="ghProxy" placeholder="https://qbank-sync.<your-subdomain>.workers.dev" autocomplete="off" />
+            </div>
+            <div class="note">If you deployed the sync proxy (Cloudflare Worker in the <code>worker/</code> folder), paste its URL here. When set, sync runs through the proxy and <strong>no token is needed</strong> &mdash; it works on every device. Leave blank to use direct GitHub sync with a token below.</div>
+            <div class="form-field">
               <label for="ghOwner">Repo Owner</label>
               <input type="text" id="ghOwner" placeholder="e.g. your-username" autocomplete="off" />
             </div>

@@ -1,0 +1,14 @@
+name = "qbank-sync"
+main = "sync-worker.js"
+compatibility_date = "2024-09-01"
+
+# Non-secret config (safe to commit). Set GH_TOKEN separately as a secret.
+# Deploy with:  wrangler deploy --var OWNER:vidhidhaduk05 --var REPO:FINAL-Q-Bank --var BRANCH:progress-data --var PATH:user_progress.json --var ALLOWED_ORIGIN:https://vidhidhaduk05.github.io
+# Then set the token secret:  wrangler secret put GH_TOKEN   (paste your fine-grained PAT when prompted)
+
+[vars]
+OWNER = "vidhidhaduk05"
+REPO = "FINAL-Q-Bank"
+BRANCH = "progress-data"
+PATH = "user_progress.json"
+ALLOWED_ORIGIN = "https://vidhidhaduk05.github.io"

@@ -1,0 +1,140 @@
+/**
+ * Q-Bank Progress Sync Proxy — Cloudflare Worker
+ * ===============================================
+ * Holds your GitHub PAT server-side so the browser app never sees the token.
+ * The app calls this Worker instead of the GitHub API directly; sync then
+ * works on every device with zero per-device token entry.
+ *
+ * Endpoints:
+ *   GET  /        -> { ok:true, progress:{...}, sha:"..." }   (read remote progress)
+ *   PUT  /        <- { progress:{...}, sha:"..." }            (write remote progress)
+ *                    -> { ok:true, sha:"..." }
+ *   OPTIONS /     -> CORS preflight
+ *
+ * Required environment (set via `wrangler secret` for the token, `wrangler deploy --var` or
+ * the dashboard for the rest):
+ *   GH_TOKEN         fine-grained GitHub PAT, Contents: read & write, scoped to this repo  [SECRET]
+ *   OWNER            e.g. vidhidhaduk05
+ *   REPO             e.g. FINAL-Q-Bank
+ *   BRANCH           e.g. progress-data
+ *   PATH             e.g. user_progress.json
+ *   ALLOWED_ORIGIN   e.g. https://vidhidhaduk05.github.io   (CORS origin; "*" = any)
+ */
+
+const API = "https://api.github.com";
+
+function corsHeaders(env) {
+  return {
+    "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN || "*",
+    "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Max-Age": "86400"
+  };
+}
+
+function json(body, status, env) {
+  return new Response(JSON.stringify(body), {
+    status: status,
+    headers: Object.assign({ "Content-Type": "application/json" }, corsHeaders(env))
+  });
+}
+
+function ghHeaders(env) {
+  return {
+    "Authorization": "Bearer " + env.GH_TOKEN,
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28"
+  };
+}
+
+// UTF-8 safe base64 (Workers run V8; btoa/atob operate on binary strings)
+function b64encode(str) { return btoa(unescape(encodeURIComponent(str))); }
+function b64decode(b64) { return decodeURIComponent(escape(atob((b64 || "").replace(/\s/g, "")))); }
+
+async function defaultBranchSha(env) {
+  const r = await fetch(API + "/repos/" + env.OWNER + "/" + env.REPO, { headers: ghHeaders(env) });
+  if (!r.ok) throw new Error("Repo lookup failed (HTTP " + r.status + "). Check OWNER/REPO/GH_TOKEN.");
+  const repo = await r.json();
+  const r2 = await fetch(API + "/repos/" + env.OWNER + "/" + env.REPO + "/git/refs/heads/" + repo.default_branch, { headers: ghHeaders(env) });
+  if (!r2.ok) throw new Error("Default branch lookup failed (HTTP " + r2.status + ").");
+  const ref = await r2.json();
+  return ref.object.sha;
+}
+
+// Create BRANCH from the default branch if it does not yet exist.
+async function ensureBranch(env) {
+  const r = await fetch(API + "/repos/" + env.OWNER + "/" + env.REPO + "/git/refs/heads/" + env.BRANCH, { headers: ghHeaders(env) });
+  if (r.ok) return;
+  if (r.status !== 404) throw new Error("Branch check failed (HTTP " + r.status + ").");
+  const sha = await defaultBranchSha(env);
+  const r2 = await fetch(API + "/repos/" + env.OWNER + "/" + env.REPO + "/git/refs", {
+    method: "POST",
+    headers: Object.assign({ "Content-Type": "application/json" }, ghHeaders(env)),
+    body: JSON.stringify({ ref: "refs/heads/" + env.BRANCH, sha: sha })
+  });
+  if (!r2.ok && r2.status !== 422) throw new Error("Branch create failed (HTTP " + r2.status + ").");
+}
+
+async function readProgress(env) {
+  const url = API + "/repos/" + env.OWNER + "/" + env.REPO + "/contents/" + encodeURIComponent(env.PATH) +
+              "?ref=" + encodeURIComponent(env.BRANCH);
+  const r = await fetch(url, { headers: ghHeaders(env) });
+  if (r.status === 404) return { progress: {}, sha: null };          // no remote file yet -> start fresh
+  if (!r.ok) throw new Error("Pull failed (HTTP " + r.status + ").");
+  const data = await r.json();
+  let progress = {};
+  try { progress = JSON.parse(b64decode(data.content)); } catch (e) { /* keep empty */ }
+  return { progress: progress, sha: data.sha || null };
+}
+
+async function writeProgress(env, progress, sha) {
+  await ensureBranch(env);
+  const url = API + "/repos/" + env.OWNER + "/" + env.REPO + "/contents/" + encodeURIComponent(env.PATH);
+  const body = {
+    message: "Update Q-Bank progress (" + new Date().toISOString().slice(0, 19) + "Z)",
+    content: b64encode(JSON.stringify(progress)),
+    branch: env.BRANCH
+  };
+  if (sha) body.sha = sha;
+  const r = await fetch(url, {
+    method: "PUT",
+    headers: Object.assign({ "Content-Type": "application/json" }, ghHeaders(env)),
+    body: JSON.stringify(body)
+  });
+  if (r.status === 409) throw new Error("Conflict — pull fresh copy first.");
+  if (!r.ok && r.status !== 200 && r.status !== 201) {
+    let msg = "Push failed (HTTP " + r.status + ").";
+    try { const j = await r.json(); if (j.message) msg = j.message; } catch (e) {}
+    throw new Error(msg);
+  }
+  const data = await r.json();
+  return { sha: (data.content && data.content.sha) || null };
+}
+
+export default {
+  async fetch(request, env) {
+    const method = request.method;
+
+    if (method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders(env) });
+    }
+
+    try {
+      if (method === "GET") {
+        const out = await readProgress(env);
+        return json({ ok: true, progress: out.progress, sha: out.sha }, 200, env);
+      }
+      if (method === "PUT") {
+        const payload = await request.json();
+        if (!payload || typeof payload.progress !== "object") {
+          return json({ ok: false, error: "Body must be { progress, sha }." }, 400, env);
+        }
+        const out = await writeProgress(env, payload.progress, payload.sha || null);
+        return json({ ok: true, sha: out.sha }, 200, env);
+      }
+      return json({ ok: false, error: "Method not allowed." }, 405, env);
+    } catch (err) {
+      return json({ ok: false, error: err.message }, 502, env);
+    }
+  }
+};
