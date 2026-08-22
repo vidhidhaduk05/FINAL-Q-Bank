@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Medical Q-Bank — MBBS Final Year Study Dashboard</title>
+  <meta name="description" content="MBBS Final Year Master Question Bank — browse, filter, and track progress across subjects, topics, and institutions." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%98%85%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="paperstyle.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- ============================ MASTHEAD ============================ -->
+  <header class="masthead">
+    <div class="masthead__top">
+      <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation" aria-expanded="false">&#9776;</button>
+      <div class="masthead__title-wrap">
+        <h1>The Medical Gazette</h1>
+        <div class="masthead__subtitle">MBBS Final Year &middot; Master Question Bank &amp; Progress Tracker</div>
+      </div>
+      <div class="masthead__tools">
+        <span class="sync-indicator" id="syncIndicator" title="Progress sync status">
+          <span class="sync-dot offline" id="syncDot"></span><span id="syncLabel">Local</span>
+        </span>
+        <button class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode">&#9681; Light</button>
+      </div>
+    </div>
+    <nav class="masthead__nav" id="mastheadNav">
+      <a href="#dashboard"   class="active" data-tab="dashboard">Dashboard</a>
+      <a href="#questions"   data-tab="questions">Questions</a>
+      <a href="#probability" data-tab="probability">Probability</a>
+      <a href="#imp"         data-tab="imp">IMP Questions</a>
+      <a href="#progress"    data-tab="progress">Progress</a>
+      <a href="#analytics"   data-tab="analytics">Analytics</a>
+      <a href="#settings"    data-tab="settings">Settings</a>
+    </nav>
+  </header>
+
+  <!-- ============================ MAIN ============================ -->
+  <main>
+    <div class="app-shell">
+
+      <!-- ---------------- DASHBOARD ---------------- -->
+      <section id="tab-dashboard" class="tab-section active">
+        <div class="section-head">
+          <h2>Dashboard</h2>
+          <span class="kicker">Vol. IV &middot; Study Edition</span>
+        </div>
+        <div class="stat-grid" id="dashStats"><!-- JS --></div>
+        <div class="section-head" style="margin-top:1.2rem;">
+          <h2 style="font-size:1.2rem;">Progress by Subject</h2>
+        </div>
+        <div class="subject-progress" id="dashSubjectProgress"><!-- JS --></div>
+      </section>
+
+      <!-- ---------------- QUESTIONS ---------------- -->
+      <section id="tab-questions" class="tab-section">
+        <div class="section-head">
+          <h2>Question Bank</h2>
+          <span class="kicker">Browse &amp; Filter</span>
+        </div>
+        <div class="filter-bar" id="qFilters"><!-- JS --></div>
+        <div class="result-count" id="qResultCount"></div>
+        <div class="qcard-grid" id="qCardGrid"><!-- JS --></div>
+        <div class="pagination" id="qPagination"></div>
+      </section>
+
+      <!-- ---------------- PROBABILITY ---------------- -->
+      <section id="tab-probability" class="tab-section">
+        <div class="section-head">
+          <h2>Probability &amp; Frequency</h2>
+          <span class="kicker">What appears most</span>
+        </div>
+        <p class="section-sub">Which topics, institutions, and years show up most often across the bank.</p>
+        <div class="chart-grid">
+          <div class="chart-card"><h3>Top Topics by Question Count</h3><div class="chart-wrap tall"><canvas id="chartTopTopics"></canvas></div></div>
+          <div class="chart-card"><h3>Institution Distribution</h3><div class="chart-wrap"><canvas id="chartInstPie"></canvas></div></div>
+          <div class="chart-card"><h3>Questions by Year</h3><div class="chart-wrap"><canvas id="chartYearBar"></canvas></div></div>
+          <div class="chart-card"><h3>Most-Repeated Questions</h3><div class="chart-wrap tall"><canvas id="chartRepeats"></canvas></div></div>
+        </div>
+      </section>
+
+      <!-- ---------------- IMP QUESTIONS ---------------- -->
+      <section id="tab-imp" class="tab-section">
+        <div class="section-head">
+          <h2>IMP Questions</h2>
+          <span class="kicker">★★ &amp; ★★★ starred</span>
+        </div>
+        <p class="section-sub">High-importance questions (★★ and ★★★). Toggle to narrow to 2026 exam questions.</p>
+        <div class="filter-bar" id="impFilters"><!-- JS --></div>
+        <div class="result-count" id="impResultCount"></div>
+        <div class="qcard-grid" id="impCardGrid"><!-- JS --></div>
+        <div class="pagination" id="impPagination"></div>
+      </section>
+
+      <!-- ---------------- PROGRESS ---------------- -->
+      <section id="tab-progress" class="tab-section">
+        <div class="section-head">
+          <h2>Progress Checklist</h2>
+          <span class="kicker">Tick topics as done</span>
+        </div>
+        <p class="section-sub">Expand a subject, then tick a topic to mark every question in it as done. State saves to GitHub automatically.</p>
+        <div class="accordion" id="progressAccordion"><!-- JS --></div>
+      </section>
+
+      <!-- ---------------- ANALYTICS ---------------- -->
+      <section id="tab-analytics" class="tab-section">
+        <div class="section-head">
+          <h2>Analytics</h2>
+          <span class="kicker">Composition</span>
+        </div>
+        <p class="section-sub">Breakdown of the bank by subject, importance, type, and institution.</p>
+        <div class="chart-grid">
+          <div class="chart-card"><h3>Questions by Subject</h3><div class="chart-wrap tall"><canvas id="chartBySubject"></canvas></div></div>
+          <div class="chart-card"><h3>Importance (Stars) Distribution</h3><div class="chart-wrap"><canvas id="chartByStars"></canvas></div></div>
+          <div class="chart-card"><h3>Questions by Type</h3><div class="chart-wrap"><canvas id="chartByType"></canvas></div></div>
+          <div class="chart-card"><h3>Institution Breakdown</h3><div class="chart-wrap"><canvas id="chartByInst"></canvas></div></div>
+        </div>
+      </section>
+
+      <!-- ---------------- SETTINGS ---------------- -->
+      <section id="tab-settings" class="tab-section">
+        <div class="section-head">
+          <h2>Settings</h2>
+          <span class="kicker">GitHub sync &amp; backup</span>
+        </div>
+        <div class="settings-grid">
+          <div class="settings-card">
+            <h3>GitHub Sync</h3>
+            <div class="form-field">
+              <label for="ghOwner">Repo Owner</label>
+              <input type="text" id="ghOwner" placeholder="e.g. your-username" autocomplete="off" />
+            </div>
+            <div class="form-field">
+              <label for="ghRepo">Repo Name</label>
+              <input type="text" id="ghRepo" placeholder="e.g. medical-qbank" autocomplete="off" />
+            </div>
+            <div class="form-field">
+              <label for="ghBranch">Progress Branch</label>
+              <input type="text" id="ghBranch" placeholder="progress-data" autocomplete="off" />
+            </div>
+            <div class="form-field">
+              <label for="ghPath">Progress File Path</label>
+              <input type="text" id="ghPath" placeholder="user_progress.json" autocomplete="off" />
+            </div>
+            <div class="form-field">
+              <label for="ghToken">Personal Access Token</label>
+              <input type="password" id="ghToken" placeholder="github_pat_..." autocomplete="off" />
+            </div>
+            <div class="note warn">Token is stored only in this browser (localStorage). Use a fine-grained PAT with <strong>Contents: read &amp; write</strong> on this repo only. Do not commit the token to the repo.</div>
+            <div class="btn-row">
+              <button class="btn primary" id="btnSaveSettings">Save Settings</button>
+              <button class="btn" id="btnTestConn">Test Connection</button>
+              <button class="btn" id="btnPull">Pull from GitHub</button>
+              <button class="btn accent" id="btnPush">Save Now</button>
+            </div>
+          </div>
+          <div class="settings-card">
+            <h3>Backup &amp; Restore</h3>
+            <p class="section-sub" style="margin:0 0 0.7rem;">Export your progress as a JSON file, or restore from a backup file.</p>
+            <div class="btn-row">
+              <button class="btn" id="btnBackup">Backup (download JSON)</button>
+              <button class="btn" id="btnRestore">Restore from file</button>
+              <input type="file" id="restoreFile" accept="application/json,.json" style="display:none" />
+            </div>
+            <h3 style="margin-top:1.2rem;">Appearance &amp; Data</h3>
+            <div class="btn-row">
+              <button class="btn" id="btnTheme2">Toggle Dark / Light</button>
+              <button class="btn danger" id="btnClearProgress">Clear All Progress</button>
+            </div>
+            <div class="note">Progress is stored as a map of question IDs to done-state. Local fallback uses this browser's storage when GitHub is not configured.</div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- ============================ FOOTER ============================ -->
+  <footer class="site-footer">
+    <div class="footer-credit">The Medical Gazette &mdash; MBBS Final Year Master Question Bank &middot; Static app, no backend</div>
+  </footer>
+
+  <!-- Toast / status container -->
+  <div id="statusBar"></div>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- App logic -->
+  <script src="app.js"></script>
+</body>
+</html>
